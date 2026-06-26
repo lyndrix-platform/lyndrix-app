@@ -2,7 +2,7 @@
 
 Android app for **Lyndrix** — a [Bubblewrap](https://github.com/GoogleChromeLabs/bubblewrap)
 **TWA** (Trusted Web Activity) that wraps the hosted PWA at
-`https://lyndrix.int.fam-feser.de` 1:1. The app is a thin native shell around the
+`https://mngm.int.fam-feser.de` 1:1. The app is a thin native shell around the
 live SPA, so it stays same-origin and auto-reflects every `lyndrix-ui` deploy — no
 app rebuild needed for frontend changes.
 
@@ -10,7 +10,7 @@ app rebuild needed for frontend changes.
 > **`lyndrix-ui`**. This repo only builds + ships the APK.
 
 ## Prerequisites
-- A machine/runner that can **reach `lyndrix.int.fam-feser.de`** (Bubblewrap fetches
+- A machine/runner that can **reach `mngm.int.fam-feser.de`** (Bubblewrap fetches
   the web manifest + icons at build time — GitHub-hosted runners can't, so CI uses a
   **self-hosted** runner).
 - **JDK 17**, **Android SDK** (cmdline-tools + build-tools + platform), **Node**.

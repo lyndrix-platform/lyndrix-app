@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build the signed Lyndrix TWA APK from twa-manifest.json.
 #
-# Run on a machine that (a) can reach https://lyndrix.int.fam-feser.de and
+# Run on a machine that (a) can reach https://mngm.int.fam-feser.de and
 # (b) has JDK 17 + Android SDK + Node. Bubblewrap regenerates the Android project
 # from twa-manifest.json, then builds + signs.
 #
