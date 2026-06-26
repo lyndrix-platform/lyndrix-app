@@ -1,0 +1,20 @@
+# Bubblewrap generates the Android project on build — keep only twa-manifest.json
+# + our meta files in git; everything generated/secret is ignored.
+android.keystore
+*.keystore
+*.jks
+*.apk
+*.aab
+app/
+gradle/
+gradlew
+gradlew.bat
+build.gradle
+settings.gradle
+build/
+.gradle/
+store_icon.png
+*.png.bak
+node_modules/
+__pycache__/
+*.pyc

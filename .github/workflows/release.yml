@@ -1,0 +1,73 @@
+name: release-apk
+
+# Tag-driven release (like the other Lyndrix repos): push vX.Y.Z -> build the
+# signed TWA APK and attach it to the GitHub Release.
+#
+# REQUIRES a SELF-HOSTED runner with network access to lyndrix.int.fam-feser.de
+# (GitHub-hosted runners cannot reach the internal host, and Bubblewrap fetches
+# the web manifest + icons at build time). The runner needs Node; JDK + Android
+# SDK are provided by the steps below.
+#
+# Secrets (repo settings -> Secrets and variables -> Actions):
+#   ANDROID_KEYSTORE_BASE64   base64 of android.keystore  (base64 -w0 android.keystore)
+#   ANDROID_KEYSTORE_PASSWORD store password
+#   ANDROID_KEY_PASSWORD      key (alias 'lyndrix') password
+
+on:
+  push:
+    tags: ['v*.*.*']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: [self-hosted, linux]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Bubblewrap
+        run: npm i -g @bubblewrap/cli
+
+      - name: Restore signing keystore
+        run: echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > android.keystore
+
+      - name: Set version from tag (guard against version.py drift)
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME#v}"
+          PYV="$(awk -F'\"' '/^__version__/{print $2}' version.py)"
+          if [ "$TAG" != "$PYV" ]; then
+            echo "::error::git tag ($TAG) != version.py ($PYV) — bump version.py before tagging"; exit 1
+          fi
+          python3 - "$TAG" "${{ github.run_number }}" <<'PY'
+          import json, sys
+          name, code = sys.argv[1], int(sys.argv[2])
+          m = json.load(open('twa-manifest.json'))
+          m['appVersionName'] = name
+          m['appVersionCode'] = code
+          json.dump(m, open('twa-manifest.json', 'w'), indent=2)
+          print(f"twa-manifest: versionName={name} versionCode={code}")
+          PY
+
+      - name: Build signed APK
+        env:
+          BUBBLEWRAP_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          BUBBLEWRAP_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          bubblewrap update --skipVersionUpgrade || true
+          bubblewrap build --skipPwaValidation
+
+      - name: Publish APK to the GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            *.apk
+          fail_on_unmatched_files: true
