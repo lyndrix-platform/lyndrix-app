@@ -11,10 +11,15 @@ gradlew
 gradlew.bat
 build.gradle
 settings.gradle
+gradle.properties
 build/
 .gradle/
+# Signed-APK side artifacts
+*.apk.idsig
+manifest-checksum.txt
 store_icon.png
 *.png.bak
 node_modules/
 __pycache__/
 *.pyc
+keystore-credentials.txt
