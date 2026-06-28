@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Lyndrix</string>
+    <string name="title_activity_main">Lyndrix</string>
+    <string name="package_name">de.famfeser.lyndrix</string>
+    <string name="custom_url_scheme">de.famfeser.lyndrix</string>
+</resources>

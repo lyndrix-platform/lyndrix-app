@@ -1,0 +1,103 @@
+apply plugin: 'com.android.application'
+
+// Version + signing are driven by the environment so CI can inject them from the git tag/secrets.
+// Local debug builds work without any of these set (release builds are simply left unsigned).
+def appVersionName = System.getenv("APP_VERSION_NAME") ?: "0.1.0"
+def appVersionCode = (System.getenv("APP_VERSION_CODE") ?: "1") as Integer
+
+def keystorePath = System.getenv("ANDROID_KEYSTORE_PATH") ?: "../../android.keystore"
+def keystorePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+def keyAliasEnv = System.getenv("ANDROID_KEY_ALIAS") ?: "lyndrix"
+def keyPasswordEnv = System.getenv("ANDROID_KEY_PASSWORD") ?: keystorePassword
+def hasReleaseSigning = keystorePassword != null && file(keystorePath).exists()
+
+android {
+    namespace "de.famfeser.lyndrix"
+    compileSdk rootProject.ext.compileSdkVersion
+    defaultConfig {
+        applicationId "de.famfeser.lyndrix"
+        minSdkVersion rootProject.ext.minSdkVersion
+        targetSdkVersion rootProject.ext.targetSdkVersion
+        versionCode appVersionCode
+        versionName appVersionName
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        aaptOptions {
+             // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
+             // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
+            ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
+        }
+    }
+
+    // buildConfigField (DEFAULT_SERVER_URL) requires explicit BuildConfig generation on AGP 8.
+    buildFeatures {
+        buildConfig true
+    }
+
+    signingConfigs {
+        release {
+            if (hasReleaseSigning) {
+                storeFile file(keystorePath)
+                storePassword keystorePassword
+                keyAlias keyAliasEnv
+                keyPassword keyPasswordEnv
+            }
+        }
+    }
+
+    // One project, two installable apps. Each flavor compiles in its own DEFAULT_SERVER_URL, which
+    // MainActivity uses as the fallback origin (the user can override it at runtime). prod keeps the
+    // canonical applicationId so existing installs update in place; dev gets a ".dev" suffix so both
+    // can coexist on one device.
+    flavorDimensions "environment"
+    productFlavors {
+        prod {
+            dimension "environment"
+            buildConfigField "String", "DEFAULT_SERVER_URL", '"https://mngm.int.fam-feser.de"'
+        }
+        dev {
+            dimension "environment"
+            applicationIdSuffix ".dev"
+            versionNameSuffix "-dev"
+            buildConfigField "String", "DEFAULT_SERVER_URL", '"https://ui.dev.int.fam-feser.de"'
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            if (hasReleaseSigning) {
+                signingConfig signingConfigs.release
+            }
+        }
+    }
+}
+
+repositories {
+    flatDir{
+        dirs '../capacitor-cordova-android-plugins/src/main/libs', 'libs'
+    }
+}
+
+dependencies {
+    implementation fileTree(include: ['*.jar'], dir: 'libs')
+    implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
+    implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
+    implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
+    implementation project(':capacitor-android')
+    testImplementation "junit:junit:$junitVersion"
+    androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
+    androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
+    implementation project(':capacitor-cordova-android-plugins')
+}
+
+apply from: 'capacitor.build.gradle'
+
+try {
+    def servicesJSON = file('google-services.json')
+    if (servicesJSON.text) {
+        apply plugin: 'com.google.gms.google-services'
+    }
+} catch(Exception e) {
+    logger.info("google-services.json not found, google-services plugin not applied. Push Notifications won't work")
+}

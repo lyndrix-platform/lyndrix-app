@@ -1,0 +1,6 @@
+<?xml version='1.0' encoding='utf-8'?>
+<!-- Dev-flavor overrides. The flavor source set wins over main/ during resource merging. -->
+<resources>
+    <string name="app_name">Lyndrix Dev</string>
+    <string name="title_activity_main">Lyndrix Dev</string>
+</resources>
