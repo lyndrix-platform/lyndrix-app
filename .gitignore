@@ -1,25 +1,26 @@
-# Bubblewrap generates the Android project on build — keep only twa-manifest.json
-# + our meta files in git; everything generated/secret is ignored.
+# The Android project now lives in android/ and IS committed (Capacitor convention).
+# It carries its own android/.gitignore for build/, .gradle/, local.properties, the copied web
+# assets, and the generated capacitor.config.json/plugins. Do NOT add unanchored rules like
+# `app/`, `gradle/`, or `build.gradle` here — they would wrongly ignore the committed android/ tree.
+
+# Node / Capacitor CLI tooling
+node_modules/
+
+# Python helper artifacts
+__pycache__/
+*.pyc
+
+# Signing material — never commit. CI restores android.keystore from ANDROID_KEYSTORE_BASE64.
 android.keystore
 *.keystore
 *.jks
+keystore-credentials.txt
+
+# Build artifacts
 *.apk
 *.aab
-app/
-gradle/
-gradlew
-gradlew.bat
-build.gradle
-settings.gradle
-gradle.properties
-build/
-.gradle/
-# Signed-APK side artifacts
 *.apk.idsig
-manifest-checksum.txt
-store_icon.png
-*.png.bak
-node_modules/
-__pycache__/
-*.pyc
-keystore-credentials.txt
+
+# IDE
+.idea/
+*.iml

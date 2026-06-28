@@ -1,66 +1,84 @@
 # lyndrix-app
 
-Android app for **Lyndrix** — a [Bubblewrap](https://github.com/GoogleChromeLabs/bubblewrap)
-**TWA** (Trusted Web Activity) that wraps the hosted PWA at
-`https://mngm.int.fam-feser.de` 1:1. The app is a thin native shell around the
-live SPA, so it stays same-origin and auto-reflects every `lyndrix-ui` deploy — no
-app rebuild needed for frontend changes.
+Android app for **Lyndrix** — a [Capacitor](https://capacitorjs.com/) native shell that
+remote-loads the Lyndrix UI from a **runtime-configurable server origin**. The UI itself still
+lives in **`lyndrix-ui`**; this repo only builds + ships the APK, so every `lyndrix-ui` deploy is
+reflected without rebuilding the app.
 
-> The PWA side (manifest, service worker, icons, `assetlinks.json`) lives in
-> **`lyndrix-ui`**. This repo only builds + ships the APK.
+Because `lyndrix-ui` talks to its backend via same-origin relative `/api/...` calls, the origin the
+app loads **is** the backend — so switching the origin (under **Settings → App** inside the app)
+points the whole app at a different Lyndrix instance (prod, dev, or any self-hosted host) with no
+CORS or auth changes.
+
+> Two installable flavors are built from one project: **prod** (`de.famfeser.lyndrix`, defaults to
+> `mngm.int.fam-feser.de`) and **dev** (`de.famfeser.lyndrix.dev`, defaults to
+> `ui.dev.int.fam-feser.de`). They can coexist on one device.
 
 ## Prerequisites
-- A machine/runner that can **reach `mngm.int.fam-feser.de`** (Bubblewrap fetches
-  the web manifest + icons at build time — GitHub-hosted runners can't, so CI uses a
-  **self-hosted** runner).
-- **JDK 17**, **Android SDK** (cmdline-tools + build-tools + platform), **Node**.
+- **JDK 21** — Capacitor 7's Android template compiles to Java 21; JDK 17 will not build it.
+- **Android SDK** (cmdline-tools + build-tools + platform 35).
+- **Node 20+** (the Capacitor CLI requires it).
 - A **signing keystore** (see below).
 
-## One-time: create the signing key + Digital Asset Link
+The build no longer needs network access to the internal Lyndrix host — the UI is loaded at
+runtime, not fetched at build time.
+
+## One-time: create the signing key
 ```bash
 keytool -genkeypair -v -keystore android.keystore -alias lyndrix \
   -keyalg RSA -keysize 2048 -validity 9125 -storetype PKCS12
-# Get the SHA256 fingerprint:
-keytool -list -v -keystore android.keystore -alias lyndrix | grep 'SHA256:'
 ```
-Put that SHA256 into **lyndrix-ui** `public/.well-known/assetlinks.json`
-(`sha256_cert_fingerprints`) and deploy lyndrix-ui — this verifies the domain and
-removes the URL bar in the TWA.
+The **same** key signs both flavors (their applicationIds differ, so there's no conflict).
 
-> Keep `android.keystore` **out of git** (it's gitignored). Back it up safely — losing
-> it means you can't ship updates under the same app identity.
+> Keep `android.keystore` **out of git** (it's gitignored). Back it up safely — losing it, or
+> changing the prod `applicationId`, permanently breaks the in-place update path for installed users.
+>
+> No Digital Asset Link / `assetlinks.json` is needed anymore — that was a TWA requirement and does
+> not apply to a Capacitor WebView app.
 
-## Build locally (most reliable first run)
+## Build locally
 ```bash
-BUBBLEWRAP_KEYSTORE_PASSWORD=... BUBBLEWRAP_KEY_PASSWORD=... ./build.sh
-# -> app-release-signed.apk
+ANDROID_KEYSTORE_PASSWORD=... ANDROID_KEY_PASSWORD=... ./build.sh
+# -> android/app/build/outputs/apk/{prod,dev}/release/*.apk
 ```
-Install/sideload the APK on the device (`adb install app-release-signed.apk`, or copy
-it over). On first launch it opens the Lyndrix SPA full-screen.
+`build.sh` runs `npm ci`, `npx cap sync android`, then Gradle `assembleProdRelease assembleDevRelease`.
+Sideload an APK (`adb install <apk>`). On first launch it loads the flavor's default Lyndrix origin.
 
 ## Release via CI (tag-driven)
 1. Configure repo **Actions secrets**: `ANDROID_KEYSTORE_BASE64` (`base64 -w0 android.keystore`),
    `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_PASSWORD`.
-2. Ensure a **self-hosted** GitHub runner (label `self-hosted, linux`) with Node +
-   network access to the internal host is online.
-3. Bump `version.py`, update `CHANGELOG.md`, commit, then cut the release:
+2. Bump `version.py`, update `CHANGELOG.md`, commit, then cut the release:
    ```bash
-   ./release_tag.py --version 0.1.0
+   ./release_tag.py --version 0.2.0
    ```
-   The `release-apk` workflow builds the signed APK and attaches it to the GitHub
-   Release for that tag. Users sideload it from the Release assets.
+   The `release-apk` workflow (GitHub-hosted runner; no internal-host access required) builds both
+   signed APKs and attaches them to the GitHub Release. CI guards that the tag matches `version.py`.
 
 ## Config
-- App identity: `packageId` `de.famfeser.lyndrix` in `twa-manifest.json` (must match the
-  `assetlinks.json` `package_name`). Changing it creates a new app identity.
-- Target site: `host` / `*Url` fields in `twa-manifest.json`.
-- `versionName`/`versionCode` are injected from the git tag + run number in CI.
+Source of truth is **`capacitor.config.ts`** (replaces the old `twa-manifest.json`). The committed
+**`android/`** project is generated by Capacitor — regenerate it with `npx cap sync` after editing
+`capacitor.config.ts`; do not hand-edit generated parts.
+
+- **App identity:** `appId = de.famfeser.lyndrix` (prod). Changing it creates a new app identity.
+- **Per-flavor default origin:** `DEFAULT_SERVER_URL` `buildConfigField` in `android/app/build.gradle`.
+- **Runtime origin override:** persisted in `SharedPreferences` by `BackendSwitcherPlugin`; the user
+  sets it under **Settings → App**. See `android/app/src/main/java/de/famfeser/lyndrix/`.
+- **`versionName`/`versionCode`** are injected from the git tag + run number in CI (`APP_VERSION_NAME`
+  / `APP_VERSION_CODE` env → Gradle).
+
+## How backend switching works (and a Capacitor gotcha)
+On Android the Capacitor bridge binds **only** to the host configured as the bridge's `serverUrl`;
+hosts reached via `allowNavigation` or a raw `loadUrl` lose the native bridge. So switching does
+**not** navigate the WebView — `BackendSwitcherPlugin.setServerUrl()` persists the new origin and
+calls `activity.recreate()`, and `MainActivity` rebuilds the bridge config against the new host on
+the fresh start. Don't "optimize" this into an in-WebView navigation.
+
+> Capacitor logs a "server.url is not recommended for production" warning. That is about **Apple App
+> Store review only** — this is an Android sideload / GitHub-Release app, so it does not apply.
 
 ## Notes
-- TWA needs the site served over a **publicly-trusted TLS cert** (you have it via ionos)
-  so Android accepts it.
-- Background **push notifications** are not enabled here (`enableNotifications: false`).
-  If you want them later, that's the point to switch to a Capacitor shell with native FCM.
-- The exact Bubblewrap CLI flags may need a tweak on the very first project generation
-  depending on the installed `@bubblewrap/cli` version (this repo ships the manifest, not
-  the generated Android project).
+- Push notifications are not enabled. Capacitor makes native FCM straightforward to add later.
+- **Offline** is not implemented in v1 (the app needs network to load the UI). The architecture
+  reserves three seams for it — see CLAUDE.md "offline extension point".
+- Launcher icons are still the Capacitor defaults; branding them is a follow-up (`store_icon.png`
+  is kept as a source image for `@capacitor/assets`).

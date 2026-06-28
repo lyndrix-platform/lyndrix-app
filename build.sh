@@ -1,27 +1,34 @@
 #!/usr/bin/env bash
-# Build the signed Lyndrix TWA APK from twa-manifest.json.
+# Build the signed Lyndrix APKs (prod + dev) from the Capacitor project.
 #
-# Run on a machine that (a) can reach https://mngm.int.fam-feser.de and
-# (b) has JDK 17 + Android SDK + Node. Bubblewrap regenerates the Android project
-# from twa-manifest.json, then builds + signs.
+# Prereqs: JDK 21, Android SDK (cmdline-tools + build-tools + platform 35), Node 20+.
+#   (Capacitor 7's Android template compiles to Java 21 — JDK 17 will NOT build it.)
 #
-# Keystore: expects ./android.keystore (alias 'lyndrix'). Create once with:
-#   keytool -genkeypair -v -keystore android.keystore -alias lyndrix \
-#     -keyalg RSA -keysize 2048 -validity 9125 -storetype PKCS12
-# Pass passwords via env so this stays non-interactive:
-#   BUBBLEWRAP_KEYSTORE_PASSWORD=... BUBBLEWRAP_KEY_PASSWORD=... ./build.sh
+# Keystore: expects ./android.keystore (alias 'lyndrix'). Pass passwords via env so this stays
+# non-interactive. The same key signs both flavors (their applicationIds differ: …lyndrix vs ….dev):
+#   ANDROID_KEYSTORE_PASSWORD=... ANDROID_KEY_PASSWORD=... ./build.sh
+#
+# Unlike the old Bubblewrap flow, the build fetches nothing from the internal Lyndrix host — the app
+# loads the UI from its server origin at RUNTIME, not build time.
 set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$SCRIPT_DIR"
 
-command -v bubblewrap >/dev/null 2>&1 || npm i -g @bubblewrap/cli
+# Version → Gradle. Defaults to version.py when not injected by CI.
+export APP_VERSION_NAME="${APP_VERSION_NAME:-$(python3 -c 'import version; print(version.__version__)')}"
+export APP_VERSION_CODE="${APP_VERSION_CODE:-1}"
 
-# Regenerate the Android project from the committed manifest, then build.
-bubblewrap update --skipVersionUpgrade || true
-bubblewrap build --skipPwaValidation
+# Signing passwords are read by android/app/build.gradle from these names.
+export ANDROID_KEYSTORE_PASSWORD="${ANDROID_KEYSTORE_PASSWORD:-}"
+export ANDROID_KEY_PASSWORD="${ANDROID_KEY_PASSWORD:-$ANDROID_KEYSTORE_PASSWORD}"
+
+command -v cap >/dev/null 2>&1 || true
+npm ci
+npx cap sync android
+
+cd android
+./gradlew assembleProdRelease assembleDevRelease
 
 echo
-echo "APK(s):"
-ls -1 ./*.apk 2>/dev/null || echo "  (none — check the build output above)"
-echo
-echo "Signing-key SHA256 (put this into lyndrix-ui /.well-known/assetlinks.json):"
-keytool -list -v -keystore android.keystore -alias lyndrix 2>/dev/null \
-  | grep -i 'SHA256:' || echo "  run: keytool -list -v -keystore android.keystore -alias lyndrix"
+echo "APKs:"
+find app/build/outputs/apk -name '*-release.apk' 2>/dev/null || echo "  (none — check the build output above)"

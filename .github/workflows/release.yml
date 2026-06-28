@@ -1,12 +1,14 @@
 name: release-apk
 
-# Tag-driven release (like the other Lyndrix repos): push vX.Y.Z -> build the
-# signed TWA APK and attach it to the GitHub Release.
+# Tag-driven release: push vX.Y.Z -> build the signed prod + dev TWA-replacement APKs
+# (Capacitor) and attach them to the GitHub Release.
 #
-# REQUIRES a SELF-HOSTED runner with network access to lyndrix.int.fam-feser.de
-# (GitHub-hosted runners cannot reach the internal host, and Bubblewrap fetches
-# the web manifest + icons at build time). The runner needs Node; JDK + Android
-# SDK are provided by the steps below.
+# Unlike the old Bubblewrap flow, the build does NOT need network access to the internal Lyndrix
+# host — Capacitor loads the UI from its server origin at RUNTIME. The build only needs the public
+# npm / Maven Central / Google registries, so this can run on a GitHub-hosted runner.
+#
+# Toolchain: Capacitor 7 requires Node 20+ and (because its Android template compiles to Java 21)
+# JDK 21. Both are provisioned by the setup steps below.
 #
 # Secrets (repo settings -> Secrets and variables -> Actions):
 #   ANDROID_KEYSTORE_BASE64   base64 of android.keystore  (base64 -w0 android.keystore)
@@ -22,24 +24,28 @@ permissions:
 
 jobs:
   build:
-    runs-on: [self-hosted, linux]
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: '21'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
 
       - uses: android-actions/setup-android@v3
 
-      - name: Install Bubblewrap
-        run: npm i -g @bubblewrap/cli
+      - name: Install JS dependencies
+        run: npm ci
 
       - name: Restore signing keystore
         run: echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > android.keystore
 
-      - name: Set version from tag (guard against version.py drift)
+      - name: Resolve version (guard against version.py drift) and inject into Gradle
         run: |
           set -euo pipefail
           TAG="${GITHUB_REF_NAME#v}"
@@ -47,27 +53,24 @@ jobs:
           if [ "$TAG" != "$PYV" ]; then
             echo "::error::git tag ($TAG) != version.py ($PYV) — bump version.py before tagging"; exit 1
           fi
-          python3 - "$TAG" "${{ github.run_number }}" <<'PY'
-          import json, sys
-          name, code = sys.argv[1], int(sys.argv[2])
-          m = json.load(open('twa-manifest.json'))
-          m['appVersionName'] = name
-          m['appVersionCode'] = code
-          json.dump(m, open('twa-manifest.json', 'w'), indent=2)
-          print(f"twa-manifest: versionName={name} versionCode={code}")
-          PY
+          echo "APP_VERSION_NAME=$TAG" >> "$GITHUB_ENV"
+          echo "APP_VERSION_CODE=${{ github.run_number }}" >> "$GITHUB_ENV"
 
-      - name: Build signed APK
+      - name: Sync Capacitor project
+        run: npx cap sync android
+
+      - name: Build signed APKs (prod + dev)
+        working-directory: android
         env:
-          BUBBLEWRAP_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          BUBBLEWRAP_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: |
-          bubblewrap update --skipVersionUpgrade || true
-          bubblewrap build --skipPwaValidation
+          ANDROID_KEYSTORE_PATH: ${{ github.workspace }}/android.keystore
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: ./gradlew assembleProdRelease assembleDevRelease
 
-      - name: Publish APK to the GitHub Release
+      - name: Publish APKs to the GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            *.apk
+            android/app/build/outputs/apk/prod/release/*.apk
+            android/app/build/outputs/apk/dev/release/*.apk
           fail_on_unmatched_files: true
